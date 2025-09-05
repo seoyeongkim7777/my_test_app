@@ -77,6 +77,20 @@ class LocationService {
     }
   }
 
+  // Get country from coordinates
+  static Future<String?> getCountryFromCoordinates(double latitude, double longitude) async {
+    try {
+      List<Placemark> placemarks = await placemarkFromCoordinates(latitude, longitude);
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks.first;
+        return place.country;
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get country from location: $e');
+    }
+  }
+
   // Calculate distance between two points
   static double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
     return Geolocator.distanceBetween(lat1, lon1, lat2, lon2);

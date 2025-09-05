@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/user_service.dart';
+import '../services/language_service.dart';
+import '../services/user_preferences_service.dart';
 import '../theme/app_theme.dart';
 
 class OnboardingPage extends StatefulWidget {
@@ -13,6 +15,8 @@ class OnboardingPage extends StatefulWidget {
 
 class _OnboardingPageState extends State<OnboardingPage> {
   final _userService = UserService();
+  final _languageService = LanguageService();
+  final _preferencesService = UserPreferencesService();
   late PageController _pageController;
   
   int _currentStep = 0;
@@ -67,7 +71,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_getLocalizedText('Welcome to Local Price Lens')),
+        title: Text(_getLocalizedText('app.welcome')),
         centerTitle: true,
         automaticallyImplyLeading: false,
       ),
@@ -79,7 +83,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
             child: Column(
               children: [
                 LinearProgressIndicator(
-                  value: (_currentStep + 1) / 5, // 5 total steps
+                  value: (_currentStep + 1) / 4, // 4 total steps
                   backgroundColor: Colors.grey.shade300,
                   valueColor: AlwaysStoppedAnimation<Color>(
                     AppTheme.lightTheme.colorScheme.primary,
@@ -87,7 +91,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _getLocalizedText('Step ${_currentStep + 1} of 5'),
+                  _getLocalizedText('onboarding.step_of').replaceAll('{step}', '${_currentStep + 1}').replaceAll('{total}', '4'),
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Colors.grey.shade600,
                   ),
@@ -123,7 +127,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: _previousStep,
-                      child: Text(_getLocalizedText('Previous')),
+                      child: Text(_getLocalizedText('common.previous')),
                     ),
                   ),
                 if (_currentStep > 0) const SizedBox(width: 16),
@@ -138,7 +142,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                     child: Text(
-                      _currentStep == 3 ? _getLocalizedText('Complete') : _getLocalizedText('Next'),
+                      _currentStep == 3 ? _getLocalizedText('common.complete') : _getLocalizedText('common.next'),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -154,7 +158,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
               child: Center(
                 child: TextButton(
                   onPressed: _skipToComplete,
-                  child: Text(_getLocalizedText('Skip optional questions')),
+                  child: Text(_getLocalizedText('common.skip_optional')),
                 ),
               ),
             ),
@@ -185,8 +189,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   Widget _buildCurrencyStep() {
     return _buildStepContent(
-      title: _getLocalizedText('Select Your Currency'),
-      subtitle: _getLocalizedText('Choose your preferred currency for price display'),
+      title: _getLocalizedText('onboarding.select_currency'),
+      subtitle: _getLocalizedText('onboarding.currency_description'),
       icon: Icons.attach_money,
       child: Column(
         children: [
@@ -195,7 +199,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
             decoration: InputDecoration(
               border: const OutlineInputBorder(),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              labelText: _getLocalizedText('Preferred Currency'),
+              labelText: _getLocalizedText('onboarding.preferred_currency'),
             ),
             items: _currencies.map((String currency) {
               String currencyName = '';
@@ -232,8 +236,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   Widget _buildUsernameStep() {
     return _buildStepContent(
-      title: _getLocalizedText('Choose Your Username'),
-      subtitle: _getLocalizedText('Pick a friendly username for your profile'),
+      title: _getLocalizedText('onboarding.choose_username'),
+      subtitle: _getLocalizedText('onboarding.username_description'),
       icon: Icons.person,
       child: Column(
         children: [
@@ -242,15 +246,15 @@ class _OnboardingPageState extends State<OnboardingPage> {
             decoration: InputDecoration(
               border: const OutlineInputBorder(),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              labelText: _getLocalizedText('Username'),
-              hintText: _getLocalizedText('Enter your username'),
+              labelText: _getLocalizedText('onboarding.username'),
+              hintText: _getLocalizedText('onboarding.enter_username'),
             ),
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
-                return _getLocalizedText('Username is required');
+                return _getLocalizedText('onboarding.username_required');
               }
               if (value.trim().length < 3) {
-                return _getLocalizedText('Username must be at least 3 characters');
+                return _getLocalizedText('onboarding.username_min_length');
               }
               return null;
             },
@@ -262,14 +266,14 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   Widget _buildInterestsStep() {
     return _buildStepContent(
-      title: _getLocalizedText('Shopping Interests'),
-      subtitle: _getLocalizedText('What types of items interest you? (Optional)'),
+      title: _getLocalizedText('onboarding.shopping_interests'),
+      subtitle: _getLocalizedText('onboarding.interests_description'),
       icon: Icons.shopping_bag,
       child: Expanded(
         child: Column(
           children: [
             Text(
-              _getLocalizedText('Select your shopping interests to get personalized recommendations'),
+              _getLocalizedText('onboarding.interests_help'),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Colors.grey.shade600,
               ),
@@ -314,7 +318,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                       ),
                       child: Center(
                         child: Text(
-                          _getLocalizedText(interest),
+                          _getLocalizedText('interests.${interest.toLowerCase().replaceAll(' ', '_').replaceAll('&', '').replaceAll('-', '_')}'),
                           style: TextStyle(
                             color: isSelected ? Colors.white : Colors.black87,
                             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
@@ -336,13 +340,13 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   Widget _buildAgeStep() {
     return _buildStepContent(
-      title: _getLocalizedText('Age Group'),
-      subtitle: _getLocalizedText('Select your age group (Optional)'),
+      title: _getLocalizedText('onboarding.age_group'),
+      subtitle: _getLocalizedText('onboarding.age_description'),
       icon: Icons.person_outline,
       child: Column(
         children: [
           Text(
-            _getLocalizedText('This helps us provide better recommendations'),
+            _getLocalizedText('onboarding.age_help'),
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Colors.grey.shade600,
             ),
@@ -354,12 +358,12 @@ class _OnboardingPageState extends State<OnboardingPage> {
             decoration: InputDecoration(
               border: const OutlineInputBorder(),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              labelText: _getLocalizedText('Age Group'),
+              labelText: _getLocalizedText('onboarding.age_group'),
             ),
             items: _ageGroups.map((String ageGroup) {
               return DropdownMenuItem<String>(
                 value: ageGroup,
-                child: Text(_getLocalizedText(ageGroup)),
+                child: Text(_getLocalizedText('age_groups.${ageGroup.toLowerCase().replaceAll(' ', '_').replaceAll('-', '_').replaceAll('+', '_plus')}')),
               );
             }).toList(),
             onChanged: (String? newValue) {
@@ -432,7 +436,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       // Validate required fields
       if (_currentStep == 1 && _usernameController.text.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_getLocalizedText('Username is required'))),
+          SnackBar(content: Text(_getLocalizedText('onboarding.username_required'))),
         );
         return;
       }
@@ -450,10 +454,14 @@ class _OnboardingPageState extends State<OnboardingPage> {
     }
   }
 
-  void _skipToComplete() {
+  void _skipToComplete() async {
     // Save basic user data to UserService even when skipping
     _userService.setCurrency(_selectedCurrency);
     _userService.setUsername(_usernameController.text);
+    
+    // Save to preferences
+    await _preferencesService.setUsername(_usernameController.text);
+    await _preferencesService.setPreferredCurrency(_selectedCurrency);
     
     // Skip Firebase saving and go directly to loading page
     // This ensures the skip button always works
@@ -465,220 +473,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   // Localization function
   String _getLocalizedText(String text) {
-    // Use English as default since language is set during signup
-    switch ('English') {
-      case 'Korean':
-        return _getKoreanText(text);
-      case 'Chinese':
-        return _getChineseText(text);
-      case 'Japanese':
-        return _getJapaneseText(text);
-      case 'Vietnamese':
-        return _getVietnameseText(text);
-      default:
-        return text; // English
-    }
+    return _languageService.getLocalizedText(text);
   }
 
-  // Korean translations
-  String _getKoreanText(String text) {
-    switch (text) {
-      case 'Welcome to Local Price Lens':
-        return 'Local Price Lens에 오신 것을 환영합니다';
-      case 'Step 1 of 5':
-        return '5단계 중 1단계';
-      case 'Step 2 of 5':
-        return '5단계 중 2단계';
-      case 'Step 3 of 5':
-        return '5단계 중 3단계';
-      case 'Step 4 of 5':
-        return '5단계 중 4단계';
-      case 'Step 5 of 5':
-        return '5단계 중 5단계';
-      case 'Choose Your Language':
-        return '언어 선택';
-      case 'Select your preferred language for the app':
-        return '앱에서 사용할 언어를 선택하세요';
-      case 'Preferred Language':
-        return '선호 언어';
-      case 'Select Your Currency':
-        return '통화 선택';
-      case 'Choose your preferred currency for price display':
-        return '가격 표시에 사용할 통화를 선택하세요';
-      case 'Preferred Currency':
-        return '선호 통화';
-      case 'Choose Your Username':
-        return '사용자명 선택';
-      case 'Pick a friendly username for your profile':
-        return '프로필에 사용할 친근한 사용자명을 선택하세요';
-      case 'Username':
-        return '사용자명';
-      case 'Enter your username':
-        return '사용자명을 입력하세요';
-      case 'Previous':
-        return '이전';
-      case 'Next':
-        return '다음';
-      case 'Complete':
-        return '완료';
-      case 'Skip optional questions':
-        return '선택사항 건너뛰기';
-      case 'Language changed to':
-        return '언어가 다음으로 변경되었습니다:';
-      default:
-        return text;
-    }
-  }
-
-  // Chinese translations
-  String _getChineseText(String text) {
-    switch (text) {
-      case 'Welcome to Local Price Lens':
-        return '欢迎使用 Local Price Lens';
-      case 'Step 1 of 5':
-        return '第 1 步，共 5 步';
-      case 'Step 2 of 5':
-        return '第 2 步，共 5 步';
-      case 'Step 3 of 5':
-        return '第 3 步，共 5 步';
-      case 'Step 4 of 5':
-        return '第 4 步，共 5 步';
-      case 'Step 5 of 5':
-        return '第 5 步，共 5 步';
-      case 'Choose Your Language':
-        return '选择您的语言';
-      case 'Select your preferred language for the app':
-        return '选择您在应用中使用的语言';
-      case 'Preferred Language':
-        return '首选语言';
-      case 'Select Your Currency':
-        return '选择您的货币';
-      case 'Choose your preferred currency for price display':
-        return '选择显示价格时使用的货币';
-      case 'Preferred Currency':
-        return '首选货币';
-      case 'Choose Your Username':
-        return '选择您的用户名';
-      case 'Pick a friendly username for your profile':
-        return '为您的个人资料选择一个友好的用户名';
-      case 'Username':
-        return '用户名';
-      case 'Enter your username':
-        return '输入用户名';
-      case 'Previous':
-        return '上一步';
-      case 'Next':
-        return '下一步';
-      case 'Complete':
-        return '完成';
-      case 'Skip optional questions':
-        return '跳过可选问题';
-      case 'Language changed to':
-        return '语言已更改为：';
-      default:
-        return text;
-    }
-  }
-
-  // Japanese translations
-  String _getJapaneseText(String text) {
-    switch (text) {
-      case 'Welcome to Local Price Lens':
-        return 'Local Price Lens へようこそ';
-      case 'Step 1 of 5':
-        return '5ステップ中 1 ステップ';
-      case 'Step 2 of 5':
-        return '5ステップ中 2 ステップ';
-      case 'Step 3 of 5':
-        return '5ステップ中 3 ステップ';
-      case 'Step 4 of 5':
-        return '5ステップ中 4 ステップ';
-      case 'Step 5 of 5':
-        return '5ステップ中 5 ステップ';
-      case 'Choose Your Language':
-        return '言語を選択';
-      case 'Select your preferred language for the app':
-        return 'アプリで使用する言語を選択してください';
-      case 'Preferred Language':
-        return '希望言語';
-      case 'Select Your Currency':
-        return '通貨を選択';
-      case 'Choose your preferred currency for price display':
-        return '価格表示に使用する通貨を選択してください';
-      case 'Preferred Currency':
-        return '希望通貨';
-      case 'Choose Your Username':
-        return 'ユーザー名を選択';
-      case 'Pick a friendly username for your profile':
-        return 'プロフィールに使用する親しみやすいユーザー名を選択してください';
-      case 'Username':
-        return 'ユーザー名';
-      case 'Enter your username':
-        return 'ユーザー名を入力してください';
-      case 'Previous':
-        return '前へ';
-      case 'Next':
-        return '次へ';
-      case 'Complete':
-        return '完了';
-      case 'Skip optional questions':
-        return 'オプション質問をスキップ';
-      case 'Language changed to':
-        return '言語が以下に変更されました：';
-      default:
-        return text;
-    }
-  }
-
-  // Vietnamese translations
-  String _getVietnameseText(String text) {
-    switch (text) {
-      case 'Welcome to Local Price Lens':
-        return 'Chào mừng đến với Local Price Lens';
-      case 'Step 1 of 5':
-        return 'Bước 1 trong 5';
-      case 'Step 2 of 5':
-        return 'Bước 2 trong 5';
-      case 'Step 3 of 5':
-        return 'Bước 3 trong 5';
-      case 'Step 4 of 5':
-        return 'Bước 4 trong 5';
-      case 'Step 5 of 5':
-        return 'Bước 5 trong 5';
-      case 'Choose Your Language':
-        return 'Chọn ngôn ngữ của bạn';
-      case 'Select your preferred language for the app':
-        return 'Chọn ngôn ngữ bạn muốn sử dụng trong ứng dụng';
-      case 'Preferred Language':
-        return 'Ngôn ngữ ưa thích';
-      case 'Select Your Currency':
-        return 'Chọn tiền tệ của bạn';
-      case 'Choose your preferred currency for price display':
-        return 'Chọn tiền tệ bạn muốn hiển thị giá';
-      case 'Preferred Currency':
-        return 'Tiền tệ ưa thích';
-      case 'Choose Your Username':
-        return 'Chọn tên người dùng';
-      case 'Pick a friendly username for your profile':
-        return 'Chọn tên người dùng thân thiện cho hồ sơ của bạn';
-      case 'Username':
-        return 'Tên người dùng';
-      case 'Enter your username':
-        return 'Nhập tên người dùng';
-      case 'Previous':
-        return 'Trước';
-      case 'Next':
-        return 'Tiếp theo';
-      case 'Complete':
-        return 'Hoàn thành';
-      case 'Skip optional questions':
-        return 'Bỏ qua câu hỏi tùy chọn';
-      case 'Language changed to':
-        return 'Ngôn ngữ đã thay đổi thành:';
-      default:
-        return text;
-    }
-  }
 
   Future<void> _completeOnboarding() async {
     setState(() {
@@ -690,6 +487,10 @@ class _OnboardingPageState extends State<OnboardingPage> {
     _userService.setUsername(_usernameController.text);
     _userService.setInterests(_selectedInterests);
     _userService.setAgeGroup(_selectedAgeGroup);
+
+    // Save to preferences
+    await _preferencesService.setUsername(_usernameController.text);
+    await _preferencesService.setPreferredCurrency(_selectedCurrency);
 
     // Simulate saving delay
     await Future.delayed(const Duration(seconds: 1));

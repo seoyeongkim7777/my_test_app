@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'onboarding_page.dart';
 import '../services/user_service.dart';
+import '../services/language_service.dart';
+import '../services/user_preferences_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -14,6 +16,8 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _userService = UserService();
+  final _languageService = LanguageService();
+  final _preferencesService = UserPreferencesService();
   
   bool _isLoading = false;
   bool _isSignUp = false;
@@ -25,10 +29,23 @@ class _LoginPageState extends State<LoginPage> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadUserPreferences();
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUserPreferences() async {
+    final preferences = await _preferencesService.getAllPreferences();
+    setState(() {
+      _selectedLanguage = preferences['language'] ?? 'English';
+    });
   }
 
   Future<void> _handleAuth() async {
@@ -48,6 +65,11 @@ class _LoginPageState extends State<LoginPage> {
         // Save email and language to UserService
         _userService.setEmail(_emailController.text);
         _userService.setLanguage(_selectedLanguage);
+        // Save preferences
+        await _preferencesService.setUserEmail(_emailController.text);
+        await _preferencesService.setPreferredLanguage(_selectedLanguage);
+        // Also update LanguageService for app-wide language consistency
+        _languageService.changeLanguage(_selectedLanguage);
         
         // Navigate to onboarding for new users
         if (mounted) {
@@ -59,6 +81,10 @@ class _LoginPageState extends State<LoginPage> {
           );
         }
       } else {
+        // Load user's language preference for sign-in users
+        final userLanguage = _userService.selectedLanguage ?? 'English';
+        _languageService.changeLanguage(userLanguage);
+        
         // Navigate directly to home for existing users
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/home');
@@ -197,6 +223,10 @@ class _LoginPageState extends State<LoginPage> {
                       setState(() {
                         _selectedLanguage = newValue;
                       });
+                      // Save language preference immediately
+                      _preferencesService.setPreferredLanguage(newValue);
+                      // Update LanguageService for app-wide language consistency
+                      _languageService.changeLanguage(newValue);
                     }
                   },
                 ),

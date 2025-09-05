@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/language_service.dart';
+import '../services/user_preferences_service.dart';
+import '../services/item_service.dart';
+import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -11,10 +14,14 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   final _languageService = LanguageService();
+  final _preferencesService = UserPreferencesService();
+  final _itemService = ItemService();
+  final _userService = UserService();
   
   Map<String, dynamic>? _userData;
   List<Map<String, dynamic>> _userItems = [];
   bool _isLoading = true;
+  String? _errorMessage;
   
   String _selectedLanguage = 'English';
   String _selectedCurrency = 'USD';
@@ -53,80 +60,101 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadUserData() async {
-    // Simulate loading delay
-    await Future.delayed(const Duration(seconds: 1));
-    
-    // Mock user data
-    setState(() {
-      _userData = {
-        'username': 'TestUser',
-        'email': 'test@example.com',
-        'preferredLanguage': 'English',
-        'preferredCurrency': 'USD',
-      };
-      _selectedLanguage = 'English';
-      _selectedCurrency = 'USD';
-    });
-    
-    // Load user's posted items
-    await _loadUserItems('test_user');
-    
-    setState(() {
-      _isLoading = false;
-    });
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+      
+      // Load user preferences
+      final preferences = await _preferencesService.getAllPreferences();
+      
+      // Get user data from UserService
+      final username = _userService.username ?? preferences['username'] ?? 'TestUser';
+      final email = _userService.email ?? preferences['email'] ?? 'test@example.com';
+      
+      setState(() {
+        _userData = {
+          'username': username,
+          'email': email,
+          'preferredLanguage': preferences['language'] ?? 'English',
+          'preferredCurrency': preferences['currency'] ?? 'USD',
+        };
+        _selectedLanguage = preferences['language'] ?? 'English';
+        _selectedCurrency = preferences['currency'] ?? 'USD';
+      });
+      
+      // Load user's posted items using actual user ID
+      await _loadUserItems(username);
+      
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to load user data: ${e.toString()}';
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _loadUserItems(String userId) async {
     try {
-      // TODO: Implement loading user's posted items
-      // For now, using mock data
+      // Get user's posted items from ItemService
+      final items = await _itemService.getItemsByUser(userId);
+      
+      // Convert Item objects to Map format for display
       setState(() {
-        _userItems = [
-          {
-            'id': '1',
-            'name': 'Traditional Korean Hanbok',
-            'price': 150000,
-            'currency': 'KRW',
-            'store': 'Gwangjang Market',
-            'location': 'Seoul, Jongno-gu',
-            'photoUrl': 'https://via.placeholder.com/150',
-            'postedAt': DateTime.now().subtract(const Duration(days: 2)),
-          },
-          {
-            'id': '2',
-            'name': 'Local Ginseng Tea',
-            'price': 25000,
-            'currency': 'KRW',
-            'store': 'Insadong Traditional Market',
-            'location': 'Seoul, Jongno-gu',
-            'photoUrl': 'https://via.placeholder.com/150',
-            'postedAt': DateTime.now().subtract(const Duration(days: 5)),
-          },
-          {
-            'id': '3',
-            'name': 'Handcrafted Ceramic Bowl',
-            'price': 45000,
-            'currency': 'KRW',
-            'store': 'Namdaemun Market',
-            'location': 'Seoul, Jung-gu',
-            'photoUrl': 'https://via.placeholder.com/150',
-            'postedAt': DateTime.now().subtract(const Duration(days: 7)),
-          },
-        ];
+        _userItems = items.map((item) => {
+          'id': item.id,
+          'name': item.itemName,
+          'price': item.price,
+          'currency': item.currency,
+          'store': item.storeName,
+          'location': item.address,
+          'photoUrl': item.photoUrl.isNotEmpty ? item.photoUrl : 'https://via.placeholder.com/150',
+          'postedAt': item.submittedAt,
+        }).toList();
       });
     } catch (e) {
-      // Handle error
+      // If no items found or error, show empty list
+      setState(() {
+        _userItems = [];
+      });
+      debugPrint('Error loading user items: $e');
     }
   }
 
   Future<void> _updatePreferences() async {
+    // Save language preference
+    await _preferencesService.setPreferredLanguage(_selectedLanguage);
+    
+    // Update LanguageService to change app language globally
+    _languageService.changeLanguage(_selectedLanguage);
+    
+    // Save currency preference
+    await _preferencesService.setPreferredCurrency(_selectedCurrency);
+    
     // Simulate saving delay
     await Future.delayed(const Duration(seconds: 1));
     
     if (mounted) {
+      // Close the settings modal
+      Navigator.of(context).pop();
+      
+      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Preferences updated successfully!')),
+        SnackBar(
+          content: Text(_languageService.getLocalizedText('profile.preferences_updated')),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
       );
+      
+      // Refresh the profile page to show updated language
+      setState(() {
+        _selectedLanguage = _languageService.currentLanguage;
+      });
     }
   }
 
@@ -138,15 +166,52 @@ class _ProfilePageState extends State<ProfilePage> {
       );
     }
 
+    if (_errorMessage != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(_languageService.getLocalizedText('navigation.profile')),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 64,
+                color: Colors.red[300],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _languageService.getLocalizedText('common.error'),
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _errorMessage!,
+                style: Theme.of(context).textTheme.bodyMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _loadUserData,
+                child: Text(_languageService.getLocalizedText('common.retry')),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Profile'),
+        title: Text(_languageService.getLocalizedText('navigation.profile')),
         centerTitle: true,
         actions: [
           IconButton(
             onPressed: _showSettings,
             icon: const Icon(Icons.settings),
-            tooltip: 'Settings',
+            tooltip: _languageService.getLocalizedText('profile.settings'),
           ),
         ],
       ),
@@ -196,23 +261,36 @@ class _ProfilePageState extends State<ProfilePage> {
                     
                     // Stats Row
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        _buildStatItem('Items Posted', _userItems.length.toString()),
-                        _buildStatItem('Days Active', '7'),
-                        _buildStatItem('Locations', '3'),
+                        _buildStatItem(_languageService.getLocalizedText('profile.items_posted'), _userItems.length.toString()),
                       ],
                     ),
                     
                     const SizedBox(height: 16),
                     
-                    // Temporary Test Button (Remove in production)
+                    // Edit Profile Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _showEditProfile,
+                        icon: const Icon(Icons.edit),
+                        label: Text(_languageService.getLocalizedText('profile.edit_profile')),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.lightTheme.colorScheme.primary,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    
+                    // Settings Button
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
                         onPressed: _showSettings,
                         icon: const Icon(Icons.settings),
-                        label: const Text('🧪 Test Settings'),
+                        label: Text(_languageService.getLocalizedText('profile.settings')),
                         style: OutlinedButton.styleFrom(
                           backgroundColor: Colors.blue.shade100,
                           foregroundColor: Colors.blue.shade800,
@@ -228,14 +306,14 @@ class _ProfilePageState extends State<ProfilePage> {
             
             // Posted Items Section
             Text(
-              'Your Posted Items',
+              _languageService.getLocalizedText('profile.your_items'),
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Items you\'ve shared with the community',
+              _languageService.getLocalizedText('profile.items_description'),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Colors.grey.shade600,
               ),
@@ -248,7 +326,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(40.0),
                 child: Text(
-                  'You haven\'t searched for local prices yet.',
+                  _languageService.getLocalizedText('profile.no_items'),
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: Colors.grey.shade600,
                   ),
@@ -417,7 +495,7 @@ class _ProfilePageState extends State<ProfilePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Settings',
+                  _languageService.getLocalizedText('profile.settings'),
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -426,7 +504,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 
                 // Language Setting
                 Text(
-                  'Preferred Language',
+                  _languageService.getLocalizedText('profile.preferred_language'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -449,8 +527,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       setState(() {
                         _selectedLanguage = newValue;
                       });
-                      // Update LanguageService to change app language globally
-                      _languageService.changeLanguage(newValue);
                     }
                   },
                 ),
@@ -458,7 +534,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 
                 // Currency Setting
                 Text(
-                  'Preferred Currency',
+                  _languageService.getLocalizedText('profile.preferred_currency'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -498,7 +574,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: const Text('Save Changes'),
+                    child: Text(_languageService.getLocalizedText('profile.save_changes')),
                   ),
                 ),
               ],
@@ -507,6 +583,216 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
+  }
+
+  void _showEditProfile() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildEditProfileSheet(),
+    );
+  }
+
+  Widget _buildEditProfileSheet() {
+    final TextEditingController usernameController = TextEditingController(text: _userData?['username'] ?? '');
+    final TextEditingController emailController = TextEditingController(text: _userData?['email'] ?? '');
+
+    return StatefulBuilder(
+      builder: (context, setModalState) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.7,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              
+              Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _languageService.getLocalizedText('profile.edit_profile'),
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    
+                    // Profile Picture Section
+                    Center(
+                      child: Column(
+                        children: [
+                          CircleAvatar(
+                            radius: 50,
+                            backgroundColor: AppTheme.lightTheme.colorScheme.primary,
+                            child: Text(
+                              (_userData?['username'] ?? 'U').substring(0, 1).toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _languageService.getLocalizedText('profile.profile_picture'),
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    
+                    // Username Field
+                    Text(
+                      _languageService.getLocalizedText('profile.username'),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: usernameController,
+                      decoration: InputDecoration(
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        hintText: _languageService.getLocalizedText('profile.enter_username'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Email Field (Read-only)
+                    Text(
+                      _languageService.getLocalizedText('profile.email'),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: emailController,
+                      enabled: false, // Make email field read-only
+                      decoration: InputDecoration(
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        hintText: _languageService.getLocalizedText('profile.enter_email'),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                        suffixIcon: Icon(
+                          Icons.lock,
+                          color: Colors.grey[600],
+                          size: 20,
+                        ),
+                      ),
+                      keyboardType: TextInputType.emailAddress,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _languageService.getLocalizedText('profile.email_readonly_note'),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey[600],
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 32),
+                    
+                    // Save Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => _saveProfileChanges(
+                          usernameController.text,
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(_languageService.getLocalizedText('profile.save_changes')),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _saveProfileChanges(String username) async {
+    try {
+      // Validate inputs
+      if (username.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_languageService.getLocalizedText('profile.username_required')),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+      
+      // Update UserService (only username)
+      _userService.setUsername(username.trim());
+      
+      // Update local state (only username)
+      setState(() {
+        _userData = {
+          ..._userData!,
+          'username': username.trim(),
+          // Keep existing email unchanged
+        };
+      });
+      
+      // Save to preferences (only username)
+      await _preferencesService.setUsername(username.trim());
+      
+      // Close the modal
+      if (mounted) {
+        Navigator.of(context).pop();
+        
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_languageService.getLocalizedText('profile.profile_updated')),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${_languageService.getLocalizedText('profile.error_updating')}: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }
 

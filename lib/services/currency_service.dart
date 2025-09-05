@@ -27,7 +27,19 @@ class CurrencyService {
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final rates = Map<String, double>.from(data['rates']);
+        final rawRates = data['rates'] as Map<String, dynamic>;
+        
+        // Convert rates to double, handling both int and double values
+        final rates = <String, double>{};
+        rawRates.forEach((key, value) {
+          if (value is int) {
+            rates[key] = value.toDouble();
+          } else if (value is double) {
+            rates[key] = value;
+          } else if (value is num) {
+            rates[key] = value.toDouble();
+          }
+        });
         
         // Cache the rates
         _rateCache[fromCurrency] = rates;
@@ -57,7 +69,7 @@ class CurrencyService {
     return amount * rate;
   }
 
-  // Get all available currencies
+  // Get all available currencies (China, US, Korea only)
   static Future<List<String>> getAvailableCurrencies() async {
     try {
       final response = await http.get(Uri.parse('${_baseUrl}USD'));
@@ -65,13 +77,15 @@ class CurrencyService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final rates = data['rates'] as Map<String, dynamic>;
-        return rates.keys.toList();
+        // Filter to only return supported currencies
+        final supportedCurrencies = ['USD', 'KRW', 'CNY'];
+        return rates.keys.where((currency) => supportedCurrencies.contains(currency)).toList();
       } else {
         throw Exception('Failed to load currencies: ${response.statusCode}');
       }
     } catch (e) {
-      // Return default currencies if API fails
-      return ['USD', 'EUR', 'GBP', 'JPY', 'KRW', 'CNY', 'AUD', 'CAD'];
+      // Return default currencies if API fails (China, US, Korea only)
+      return ['USD', 'KRW', 'CNY'];
     }
   }
 
@@ -89,25 +103,15 @@ class CurrencyService {
     _cacheTimestamps.clear();
   }
 
-  // Get formatted price string with currency symbol
+  // Get formatted price string with currency symbol (China, US, Korea only)
   static String formatPrice(double price, String currency) {
     switch (currency) {
       case 'USD':
         return '\$${price.toStringAsFixed(2)}';
-      case 'EUR':
-        return '€${price.toStringAsFixed(2)}';
-      case 'GBP':
-        return '£${price.toStringAsFixed(2)}';
-      case 'JPY':
-        return '¥${price.toStringAsFixed(0)}';
       case 'KRW':
         return '₩${price.toStringAsFixed(0)}';
       case 'CNY':
         return '¥${price.toStringAsFixed(2)}';
-      case 'AUD':
-        return 'A\$${price.toStringAsFixed(2)}';
-      case 'CAD':
-        return 'C\$${price.toStringAsFixed(2)}';
       default:
         return '${price.toStringAsFixed(2)} $currency';
     }

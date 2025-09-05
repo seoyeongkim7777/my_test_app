@@ -8,9 +8,18 @@ import 'pages/item_submission_page.dart';
 import 'pages/nearby_items_page.dart';
 import 'pages/loading_page.dart';
 import 'theme/app_theme.dart';
+import 'services/user_preferences_service.dart';
+import 'services/language_service.dart';
 
-
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize preferences
+  await UserPreferencesService().initializePreferences();
+  
+  // Initialize language service
+  await LanguageService().initialize();
+  
   runApp(const MyApp());
 }
 

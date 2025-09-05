@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import '../models/item_model.dart';
 import '../services/item_service.dart';
 import '../services/location_service.dart';
-import '../services/language_service.dart';
-import '../services/currency_mapping_service.dart';
 import 'store_detail_page.dart';
 
 class PriceComparisonResultsPage extends StatefulWidget {
@@ -23,9 +21,9 @@ class PriceComparisonResultsPage extends StatefulWidget {
 
 class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage> {
   final ItemService _itemService = ItemService();
-  final LanguageService _languageService = LanguageService();
   
   Map<String, dynamic>? _priceAnalysis;
+  List<Map<String, dynamic>> _nearbyStores = [];
   List<Map<String, dynamic>> _allNearbyStores = []; // All available stores
   List<Map<String, dynamic>> _displayedStores = []; // Currently displayed stores
   bool _isLoading = true;
@@ -37,7 +35,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
   
   // Pagination settings
   static const int _initialStoresCount = 4;
-  static const int _loadMoreStoresCount = 10;
+  static const int _loadMoreStoresCount = 6;
 
   @override
   void initState() {
@@ -59,12 +57,8 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
         _userLongitude = position.longitude;
       }
 
-      // Get user's preferred currency
-      try {
-        _userCurrency = await CurrencyMappingService.getUserHomeCurrency();
-      } catch (e) {
-        _userCurrency = 'USD'; // Fallback to USD
-      }
+      // Get user's preferred currency (mock data)
+      _userCurrency = 'USD';
 
       // Analyze price fairness
       final analysis = await _itemService.analyzePriceFairness(widget.submittedItem);
@@ -84,7 +78,8 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
       setState(() {
         _priceAnalysis = analysis;
         _allNearbyStores = stores;
-        // Show only the first 4 stores initially
+        _nearbyStores = stores;
+        // Show only the first few stores initially
         _displayedStores = stores.take(_initialStoresCount).toList();
         _isLoading = false;
       });
@@ -100,7 +95,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_languageService.getLocalizedText('common.search')),
+        title: const Text('Price Comparison Results'),
         backgroundColor: const Color(0xFF00838F),
         foregroundColor: Colors.white,
         elevation: 0,
@@ -129,7 +124,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
           ),
           const SizedBox(height: 16),
           Text(
-            _languageService.getLocalizedText('common.error'),
+            'Something went wrong',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 8),
@@ -141,7 +136,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: _initializePage,
-            child: Text(_languageService.getLocalizedText('common.retry')),
+            child: const Text('Try Again'),
           ),
         ],
       ),
@@ -168,9 +163,6 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
           
           // Nearby Stores Section
           _buildNearbyStoresSection(),
-          
-          // Bottom padding to prevent scroll issues
-          const SizedBox(height: 32),
         ],
       ),
     );
@@ -183,15 +175,15 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF00838F).withValues(alpha: 0.1),
-            const Color(0xFF00838F).withValues(alpha: 0.05),
+            const Color(0xFF00838F).withValues(alpha:0.1),
+            const Color(0xFF00838F).withValues(alpha:0.05),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: const Color(0xFF00838F).withValues(alpha: 0.2),
+          color: const Color(0xFF00838F).withValues(alpha:0.2),
           width: 1,
         ),
       ),
@@ -228,7 +220,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFF00838F).withValues(alpha: 0.1),
+              color: const Color(0xFF00838F).withValues(alpha:0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
@@ -250,7 +242,6 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
     final isFair = analysis['isFair'] as bool;
     final message = analysis['message'] as String;
     final description = analysis['description'] as String;
-    final reasoning = analysis['reasoning'] as String?;
     final confidence = analysis['confidence'] as String;
     final similarItemsCount = analysis['similarItemsCount'] as int;
 
@@ -296,50 +287,6 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
                 color: Colors.grey[700],
               ),
             ),
-            if (reasoning != null) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.grey[300]!,
-                    width: 1,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.lightbulb_outline,
-                          color: Colors.amber[600],
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Detailed Analysis',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      reasoning,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[700],
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
             const SizedBox(height: 16),
             Row(
               children: [
@@ -374,7 +321,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
   }
 
   Widget _buildNearbyStoresSection() {
-    if (_displayedStores.isEmpty) {
+    if (_nearbyStores.isEmpty) {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -429,7 +376,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            childAspectRatio: 0.9,
+            childAspectRatio: 0.75,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
@@ -497,13 +444,13 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
         onTap: () => _navigateToStoreDetail(item),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Item Image
               Expanded(
-                flex: 2,
+                flex: 3,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: item.photoUrl.isNotEmpty
@@ -534,7 +481,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
                         ),
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               // Store Name
               Text(
                 item.storeName,
@@ -544,7 +491,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 4),
               // Item Name
               Text(
                 item.itemName,
@@ -552,7 +499,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 4),
               // Location
               Row(
                 children: [
@@ -574,7 +521,7 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               // Price
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -586,24 +533,18 @@ class _PriceComparisonResultsPageState extends State<PriceComparisonResultsPage>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(
-                      child: Text(
-                        CurrencyMappingService.getCurrencySymbol(_userCurrency) + convertedPrice.toStringAsFixed(2),
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.green[700],
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    Text(
+                      '\$${convertedPrice.toStringAsFixed(2)}',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        '(${CurrencyMappingService.getCurrencySymbol(originalCurrency)}${originalPrice.toStringAsFixed(originalCurrency == 'KRW' ? 0 : 2)})',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    Text(
+                      '($originalCurrency ${originalPrice.toStringAsFixed(0)})',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey[600],
                       ),
                     ),
                   ],

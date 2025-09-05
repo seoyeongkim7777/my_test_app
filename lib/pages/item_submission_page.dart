@@ -6,7 +6,12 @@ import 'package:permission_handler/permission_handler.dart';
 import '../services/ai_recognition_service.dart';
 import '../services/location_service.dart';
 import '../services/currency_service.dart';
+import '../services/currency_mapping_service.dart';
+import '../services/user_service.dart';
+import '../services/language_service.dart';
 import '../theme/app_theme.dart';
+import '../models/item_model.dart';
+import 'price_comparison_results_page.dart';
 
 class ItemSubmissionPage extends StatefulWidget {
   const ItemSubmissionPage({super.key});
@@ -18,6 +23,7 @@ class ItemSubmissionPage extends StatefulWidget {
 class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
   final _imagePicker = ImagePicker();
   final _aiService = AIRecognitionService();
+  final _languageService = LanguageService();
   late PageController _pageController;
   
   int _currentStep = 0;
@@ -34,9 +40,10 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
   
   // Step 3: Price
   final TextEditingController _priceController = TextEditingController();
-  String _localCurrency = 'KRW'; // Currency based on location
+  String _localCurrency = 'KRW'; // Currency based on location (default to KRW for Korea)
   String _userPreferredCurrency = 'USD'; // User's preferred currency
   double _convertedPrice = 0.0;
+  bool _isLoadingCurrency = true; // Loading state for currency detection
   
 
   @override
@@ -57,79 +64,107 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
   }
 
   Future<void> _loadUserPreferences() async {
-    // Load user's preferred currency from LanguageService or user data
-    // For now, using default values
+    // Load user's preferred currency from UserService
+    final userService = UserService();
+    String preferredCurrency = userService.selectedCurrency ?? 'USD';
+    
+    // If no currency is set, try to detect from user's home location
+    if (preferredCurrency == 'USD') {
+      try {
+        // Get user's home currency (this could be from user preferences or device locale)
+        // For now, we'll use a simple approach - in a real app, this would be more sophisticated
+        preferredCurrency = await CurrencyMappingService.getUserHomeCurrency();
+      } catch (e) {
+        debugPrint('Error getting user home currency: $e');
+        preferredCurrency = 'USD'; // Fallback to USD
+      }
+    }
+    
     setState(() {
-      _userPreferredCurrency = 'USD'; // This should come from user preferences
+      _userPreferredCurrency = preferredCurrency;
     });
   }
 
   Future<void> _loadLocationBasedCurrency() async {
     try {
-      // Get current location and determine local currency
-      final position = await LocationService.getCurrentLocation();
-      if (position != null) {
-        // Mock location-based currency detection
-        // In real app, this would be based on country/region
+      // Get current location
+      final locationDetails = await LocationService.getCurrentLocationWithDetails();
+      final latitude = locationDetails['latitude'] as double;
+      final longitude = locationDetails['longitude'] as double;
+      
+      // Get local currency based on location
+      final localCurrency = await CurrencyMappingService.getLocalCurrencyFromCoordinates(latitude, longitude);
+      
+      if (mounted) {
+        setState(() {
+          _localCurrency = localCurrency;
+          _isLoadingCurrency = false;
+        });
+        debugPrint('🌍 Location-based currency detected: $_localCurrency');
+      }
+    } catch (e) {
+      debugPrint('Error loading location-based currency: $e');
+      // Keep default currency (KRW for Korea) if location fails
+      if (mounted) {
         setState(() {
           _localCurrency = 'KRW'; // Default to Korean Won for Korea
+          _isLoadingCurrency = false;
         });
       }
-    } catch (e) {
-      // Use default currency if location fails
-      setState(() {
-        _localCurrency = 'KRW';
-      });
     }
   }
 
-  void _onPriceChanged() {
+  void _onPriceChanged() async {
     if (_priceController.text.isNotEmpty) {
-      _convertPrice();
+      final price = double.tryParse(_priceController.text);
+      if (price != null) {
+        try {
+          // Convert price to user's preferred currency
+          _convertedPrice = await CurrencyService.convertPrice(
+            price, 
+            _localCurrency, 
+            _userPreferredCurrency
+          );
+          setState(() {});
+        } catch (e) {
+          debugPrint('Failed to convert price: $e');
+          // Set converted price to 0 if conversion fails
+          _convertedPrice = 0.0;
+          setState(() {});
+        }
+      }
     }
   }
 
-  Future<void> _convertPrice() async {
-    try {
-      final price = double.tryParse(_priceController.text);
-      if (price != null && _localCurrency != _userPreferredCurrency) {
-        final converted = await CurrencyService.convertPrice(
-          price, 
-          _localCurrency, 
-          _userPreferredCurrency
-        );
-        setState(() {
-          _convertedPrice = converted;
-        });
-      }
-    } catch (e) {
-      // Handle conversion error
+  // Get price validation error message
+  String? _getPriceValidationError(String priceText) {
+    if (priceText.trim().isEmpty) {
+      return _languageService.getLocalizedText('item_submission.price_required');
     }
+    
+    final price = double.tryParse(priceText.trim());
+    if (price == null) {
+      return _languageService.getLocalizedText('item_submission.price_invalid');
+    }
+    
+    if (price <= 0) {
+      return _languageService.getLocalizedText('item_submission.price_positive');
+    }
+    
+    return null;
   }
 
   String _getCurrencySymbol(String currency) {
-    switch (currency) {
-      case 'USD': return '\$';
-      case 'KRW': return '₩';
-      case 'EUR': return '€';
-      case 'JPY': return '¥';
-      case 'CNY': return '¥';
-      case 'VND': return '₫';
-      case 'THB': return '฿';
-      default: return currency;
-    }
+    return CurrencyMappingService.getCurrencySymbol(currency);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('See the Real Price'),
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
+        title: Text(_languageService.getLocalizedText('item_submission.submit_item')),
+        backgroundColor: AppTheme.lightTheme.colorScheme.primary,
+        foregroundColor: Colors.white,
       ),
       body: Column(
         children: [
@@ -139,7 +174,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
             child: Column(
               children: [
                 LinearProgressIndicator(
-                  value: (_currentStep + 1) / 4, // 4 total steps
+                  value: (_currentStep + 1) / 4,
                   backgroundColor: Colors.grey.shade300,
                   valueColor: AlwaysStoppedAnimation<Color>(
                     AppTheme.lightTheme.colorScheme.primary,
@@ -147,7 +182,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Step ${_currentStep + 1} of 4',
+                  _languageService.getLocalizedText('item_submission.step_of').replaceAll('{step}', '${_currentStep + 1}').replaceAll('{total}', '4'),
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Colors.grey.shade600,
                   ),
@@ -183,13 +218,13 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: _previousStep,
-                      child: const Text('Previous'),
+                      child: Text(_languageService.getLocalizedText('item_submission.previous')),
                     ),
                   ),
                 if (_currentStep > 0) const SizedBox(width: 16),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _nextStep,
+                    onPressed: _isLoading ? null : (_currentStep == 3 ? _submitItem : _nextStep),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _currentStep == 3 
                         ? AppTheme.lightTheme.colorScheme.primary
@@ -198,7 +233,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                     child: Text(
-                      _currentStep == 3 ? 'Submit Item' : 'Next',
+                      _currentStep == 3 ? _languageService.getLocalizedText('item_submission.submit_item') : _languageService.getLocalizedText('item_submission.next'),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -224,7 +259,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           const SizedBox(height: 24),
           Text(
-            'Take a Photo',
+            _languageService.getLocalizedText('item_submission.take_photo_title'),
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.bold,
             ),
@@ -232,7 +267,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Take a photo of the item you want to price check',
+            _languageService.getLocalizedText('item_submission.take_photo_description'),
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: Colors.grey.shade600,
             ),
@@ -275,7 +310,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              'Photo captured!',
+              _languageService.getLocalizedText('item_submission.photo_captured'),
               style: TextStyle(
                 color: Colors.green.shade600,
                 fontWeight: FontWeight.w600,
@@ -300,7 +335,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'No photo yet',
+                    _languageService.getLocalizedText('item_submission.no_photo'),
                     style: TextStyle(
                       color: Colors.grey.shade500,
                       fontSize: 16,
@@ -313,13 +348,14 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           
           const SizedBox(height: 32),
           
+          // Action buttons
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _takePhoto,
                   icon: const Icon(Icons.camera_alt),
-                  label: const Text('Take Photo'),
+                  label: Text(_languageService.getLocalizedText('item_submission.take_photo_button')),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
@@ -330,7 +366,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
                 child: OutlinedButton.icon(
                   onPressed: _pickFromGallery,
                   icon: const Icon(Icons.photo_library),
-                  label: const Text('Gallery'),
+                  label: Text(_languageService.getLocalizedText('item_submission.gallery')),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
@@ -365,13 +401,13 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
       child: Column(
         children: [
           Icon(
-            Icons.auto_awesome,
+            Icons.info_outline,
             size: 64,
             color: AppTheme.lightTheme.colorScheme.primary,
           ),
           const SizedBox(height: 24),
           Text(
-            'Item Information',
+            _languageService.getLocalizedText('item_submission.item_information'),
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.bold,
             ),
@@ -379,7 +415,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           const SizedBox(height: 12),
           Text(
-            'AI has detected the item details. You can edit them if needed.',
+            _languageService.getLocalizedText('item_submission.review_edit'),
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: Colors.grey.shade600,
             ),
@@ -387,67 +423,60 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           const SizedBox(height: 32),
           
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  // Item Name
-                  TextFormField(
-                    initialValue: _itemName,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: 'Item Name',
-                      hintText: 'e.g., Traditional Korean Hanbok',
-                    ),
-                    onChanged: (value) {
-                      _itemName = value;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Category
-                  TextFormField(
-                    initialValue: _category,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: 'Category',
-                      hintText: 'e.g., Clothing, Food, Electronics',
-                    ),
-                    onChanged: (value) {
-                      _category = value;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Store Name
-                  TextFormField(
-                    initialValue: _storeName,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: 'Store Name',
-                      hintText: 'e.g., Heritage Market',
-                    ),
-                    onChanged: (value) {
-                      _storeName = value;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Address
-                  TextFormField(
-                    initialValue: _address,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: 'Store Address',
-                      hintText: 'e.g., Busan, Jung-gu',
-                    ),
-                    onChanged: (value) {
-                      _address = value;
-                    },
-                  ),
-                ],
-              ),
+          // Form fields
+          TextFormField(
+            initialValue: _itemName,
+            decoration: InputDecoration(
+              labelText: _languageService.getLocalizedText('item_submission.item_name_label'),
+              border: OutlineInputBorder(),
             ),
+            onChanged: (value) {
+              setState(() {
+                _itemName = value;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          TextFormField(
+            initialValue: _category,
+            decoration: InputDecoration(
+              labelText: _languageService.getLocalizedText('item_submission.category_label'),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) {
+              setState(() {
+                _category = value;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          TextFormField(
+            initialValue: _storeName,
+            decoration: InputDecoration(
+              labelText: _languageService.getLocalizedText('item_submission.store_name'),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) {
+              setState(() {
+                _storeName = value;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          TextFormField(
+            initialValue: _address,
+            decoration: InputDecoration(
+              labelText: _languageService.getLocalizedText('item_submission.address'),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) {
+              setState(() {
+                _address = value;
+              });
+            },
           ),
         ],
       ),
@@ -466,7 +495,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           const SizedBox(height: 24),
           Text(
-            'Enter Price',
+            _languageService.getLocalizedText('item_submission.set_price'),
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.bold,
             ),
@@ -474,7 +503,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Enter the price you found for this item',
+            _languageService.getLocalizedText('item_submission.price_description'),
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: Colors.grey.shade600,
             ),
@@ -482,25 +511,8 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           const SizedBox(height: 32),
           
-          // Price Input with Local Currency
-          TextFormField(
-            controller: _priceController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              labelText: 'Price in $_localCurrency',
-              hintText: 'e.g., 150000',
-              prefixIcon: Text(
-                _getCurrencySymbol(_localCurrency),
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              prefixIconConstraints: const BoxConstraints(minWidth: 50),
-            ),
-          ),
-          const SizedBox(height: 16),
-          
-          // Show converted price if different from local currency
-          if (_priceController.text.isNotEmpty && _localCurrency != _userPreferredCurrency) ...[
+          // Currency detection status
+          if (_isLoadingCurrency) ...[
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -510,17 +522,19 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.compare_arrows,
-                    color: Colors.blue.shade600,
-                    size: 20,
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
+                    ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
                   Text(
-                    '≈ ${_getCurrencySymbol(_userPreferredCurrency)}${_convertedPrice.toStringAsFixed(2)} $_userPreferredCurrency',
+                    'Detecting local currency based on your location...',
                     style: TextStyle(
                       color: Colors.blue.shade700,
-                      fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
                   ),
@@ -530,49 +544,84 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
             const SizedBox(height: 16),
           ],
           
-          const Spacer(),
+          // Price input
+          TextFormField(
+            controller: _priceController,
+            keyboardType: TextInputType.number,
+            enabled: !_isLoadingCurrency,
+            decoration: InputDecoration(
+              labelText: 'Price in $_localCurrency (${CurrencyMappingService.getCurrencyName(_localCurrency)})',
+              hintText: 'Enter the price you see in the store',
+              prefixText: _getCurrencySymbol(_localCurrency),
+              border: const OutlineInputBorder(),
+              errorText: _priceController.text.isNotEmpty 
+                ? _getPriceValidationError(_priceController.text)
+                : null,
+              errorStyle: const TextStyle(
+                color: Colors.red,
+                fontSize: 12,
+              ),
+              focusedErrorBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.red.shade600, width: 2),
+              ),
+              errorBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.red.shade400, width: 1),
+              ),
+            ),
+          ),
           
-          // Price Preview
-          if (_priceController.text.isNotEmpty) ...[
+          // Currency detection info
+          if (!_isLoadingCurrency) ...[
+            const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.green.shade200),
               ),
-              child: Column(
+              child: Row(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.check_circle,
-                        color: Colors.green.shade600,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Local Price: ${_getCurrencySymbol(_localCurrency)}${_priceController.text} $_localCurrency',
-                        style: TextStyle(
-                          color: Colors.green.shade700,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (_localCurrency != _userPreferredCurrency) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Your Currency: ${_getCurrencySymbol(_userPreferredCurrency)}${_convertedPrice.toStringAsFixed(2)} $_userPreferredCurrency',
+                  Icon(Icons.location_on, color: Colors.green.shade700, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Enter the price you see in the store using ${_getCurrencySymbol(_localCurrency)} $_localCurrency (${CurrencyMappingService.getCurrencyName(_localCurrency)})',
                       style: TextStyle(
-                        color: Colors.green.shade600,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 14,
+                        color: Colors.green.shade700,
+                        fontSize: 12,
                       ),
                     ),
-                  ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+          
+          // Currency conversion display
+          if (_priceController.text.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.currency_exchange, color: Colors.blue.shade700),
+                  const SizedBox(width: 8),
+                  Text(
+                    _convertedPrice > 0 
+                      ? '≈ ${_getCurrencySymbol(_userPreferredCurrency)}${_convertedPrice.toStringAsFixed(2)} $_userPreferredCurrency'
+                      : 'Conversion failed - check internet connection',
+                    style: TextStyle(
+                      color: _convertedPrice > 0 ? Colors.blue.shade700 : Colors.orange.shade700,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -595,7 +644,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Submit Item',
+              _languageService.getLocalizedText('item_submission.submit_item'),
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -603,7 +652,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Review your submission and submit to help other travelers',
+              _languageService.getLocalizedText('item_submission.review_submission'),
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 color: Colors.grey.shade600,
               ),
@@ -653,37 +702,14 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
                       const SizedBox(height: 16),
                     ],
                     
-                    _buildReviewRow('Item Name', _itemName),
-                    _buildReviewRow('Category', _category),
-                    _buildReviewRow('Store', _storeName),
-                    _buildReviewRow('Address', _address),
-                    _buildReviewRow('Local Price', '${_getCurrencySymbol(_localCurrency)}${_priceController.text} $_localCurrency'),
+                    _buildReviewRow(_languageService.getLocalizedText('item_submission.item_name_label'), _itemName),
+                    _buildReviewRow(_languageService.getLocalizedText('item_submission.category_label'), _category),
+                    _buildReviewRow(_languageService.getLocalizedText('item_submission.store_label'), _storeName),
+                    _buildReviewRow(_languageService.getLocalizedText('item_submission.address_label'), _address),
+                    _buildReviewRow(_languageService.getLocalizedText('item_submission.local_price'), '${_getCurrencySymbol(_localCurrency)}${_priceController.text} $_localCurrency'),
                     if (_localCurrency != _userPreferredCurrency)
-                      _buildReviewRow('Your Currency', '${_getCurrencySymbol(_userPreferredCurrency)}${_convertedPrice.toStringAsFixed(2)} $_userPreferredCurrency'),
+                      _buildReviewRow(_languageService.getLocalizedText('item_submission.your_currency'), '${_getCurrencySymbol(_userPreferredCurrency)}${_convertedPrice.toStringAsFixed(2)} $_userPreferredCurrency'),
                   ],
-                ),
-              ),
-            ),
-            
-            const SizedBox(height: 32), // Fixed height instead of Spacer
-            
-            // Submit Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _isLoading ? null : _submitItem,
-                icon: _isLoading 
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.send),
-                label: Text(_isLoading ? 'Submitting...' : 'Submit Item'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.lightTheme.colorScheme.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
               ),
             ),
@@ -711,10 +737,8 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           ),
           Expanded(
             child: Text(
-              value.isEmpty ? 'Not specified' : value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w500,
-              ),
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w500),
             ),
           ),
         ],
@@ -742,23 +766,31 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
       // Validate current step
       if (_currentStep == 0 && _selectedImage == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please take a photo first')),
+          SnackBar(content: Text(_languageService.getLocalizedText('item_submission.take_photo'))),
         );
         return;
       }
       
       if (_currentStep == 1 && _itemName.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please enter an item name')),
+          SnackBar(content: Text(_languageService.getLocalizedText('item_submission.enter_name'))),
         );
         return;
       }
       
-      if (_currentStep == 2 && _priceController.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please enter a price')),
-        );
-        return;
+      // Validate price input for step 2
+      if (_currentStep == 2) {
+        final priceError = _getPriceValidationError(_priceController.text);
+        if (priceError != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(priceError),
+              backgroundColor: Colors.red.shade600,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          return;
+        }
       }
       
       setState(() {
@@ -776,31 +808,31 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
 
   Future<void> _takePhoto() async {
     try {
-      print('📸 Starting camera photo capture...');
+      debugPrint('📸 Starting camera photo capture...');
       
       // Check current permission status
       var cameraStatus = await Permission.camera.status;
-      print('📸 Camera permission status: $cameraStatus');
+      debugPrint('📸 Camera permission status: $cameraStatus');
       
       // If permission is denied, show dialog
       if (cameraStatus == PermissionStatus.denied) {
-        print('📸 Camera permission denied, showing dialog...');
+        debugPrint('📸 Camera permission denied, showing dialog...');
         
         final shouldAllow = await _showPermissionDialog(
-          'Camera Permission',
-          'This app needs camera access to take photos of items. Would you like to allow camera access?',
+          _languageService.getLocalizedText('item_submission.camera_permission'),
+          _languageService.getLocalizedText('item_submission.camera_permission_message'),
         );
         
         if (shouldAllow) {
           // User chose Allow, request permission
           cameraStatus = await Permission.camera.request();
-          print('📸 Permission requested, new status: $cameraStatus');
+          debugPrint('📸 Permission requested, new status: $cameraStatus');
         } else {
           // User chose Close, show message and return
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Camera access is needed to take photos. You can use "Use Test Image" button for testing.'),
+              SnackBar(
+                content: Text(_languageService.getLocalizedText('item_submission.camera_access_needed')),
                 backgroundColor: Colors.orange,
                 duration: Duration(seconds: 3),
               ),
@@ -812,11 +844,11 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
       
       // If permission is permanently denied, show settings dialog
       if (cameraStatus == PermissionStatus.permanentlyDenied) {
-        print('📸 Camera permission permanently denied');
+        debugPrint('📸 Camera permission permanently denied');
         
         final shouldOpenSettings = await _showSettingsDialog(
-          'Camera Permission Required',
-          'Camera access has been permanently denied. Please enable it in Settings to take photos.',
+          _languageService.getLocalizedText('item_submission.camera_permission_required'),
+          _languageService.getLocalizedText('item_submission.camera_permission_denied'),
         );
         
         if (shouldOpenSettings) {
@@ -825,8 +857,8 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Camera access is needed to take photos. You can use "Use Test Image" button for testing.'),
+            SnackBar(
+              content: Text(_languageService.getLocalizedText('item_submission.camera_access_needed')),
               backgroundColor: Colors.orange,
               duration: Duration(seconds: 3),
             ),
@@ -837,7 +869,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
       
       // If permission is granted, take photo
       if (cameraStatus == PermissionStatus.granted) {
-        print('📸 Permission granted, opening camera...');
+        debugPrint('📸 Permission granted, opening camera...');
         
         final XFile? image = await _imagePicker.pickImage(
           source: ImageSource.camera,
@@ -845,26 +877,22 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           imageQuality: 80,
         );
         
-        print('📸 Image picker result: ${image?.path ?? "null"}');
+        debugPrint('📸 Image picker result: ${image?.path ?? "null"}');
         
         if (image != null) {
           setState(() {
             _selectedImage = image;
           });
-          
-          print('📸 Image selected successfully: ${image.path}');
-          
-          // Auto-fill information using AI
           _autoFillItemInfo();
         } else {
-          print('📸 No image selected (user cancelled)');
+          debugPrint('📸 No image selected');
         }
       } else {
-        print('📸 Camera permission still not granted: $cameraStatus');
+        debugPrint('📸 Camera permission still not granted: $cameraStatus');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Camera permission is required to take photos. Use "Use Test Image" button for testing.'),
+            SnackBar(
+              content: Text(_languageService.getLocalizedText('item_submission.camera_access_needed')),
               backgroundColor: Colors.orange,
               duration: Duration(seconds: 3),
             ),
@@ -872,10 +900,13 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
         }
       }
     } catch (e) {
-      print('📸 Error taking photo: $e');
+      debugPrint('📸 Error taking photo: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error taking photo: $e')),
+          SnackBar(
+            content: Text('${_languageService.getLocalizedText('item_submission.error_taking_photo')}: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -883,31 +914,31 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
 
   Future<void> _pickFromGallery() async {
     try {
-      print('🖼️ Starting gallery photo selection...');
+      debugPrint('🖼️ Starting gallery photo selection...');
       
       // Check current permission status
       var photoStatus = await Permission.photos.status;
-      print('🖼️ Photo permission status: $photoStatus');
+      debugPrint('🖼️ Photo permission status: $photoStatus');
       
       // If permission is denied, show dialog
       if (photoStatus == PermissionStatus.denied) {
-        print('🖼️ Photo permission denied, showing dialog...');
+        debugPrint('🖼️ Photo permission denied, showing dialog...');
         
         final shouldAllow = await _showPermissionDialog(
-          'Photo Library Permission',
-          'This app needs access to your photo library to select photos. Would you like to allow photo library access?',
+          _languageService.getLocalizedText('item_submission.photo_library_permission'),
+          _languageService.getLocalizedText('item_submission.photo_library_permission_message'),
         );
         
         if (shouldAllow) {
           // User chose Allow, request permission
           photoStatus = await Permission.photos.request();
-          print('🖼️ Permission requested, new status: $photoStatus');
+          debugPrint('🖼️ Permission requested, new status: $photoStatus');
         } else {
           // User chose Close, show message and return
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Photo library access is needed to select images. You can use "Use Test Image" button for testing.'),
+                              SnackBar(
+                content: Text(_languageService.getLocalizedText('item_submission.photo_library_access_needed')),
                 backgroundColor: Colors.orange,
                 duration: Duration(seconds: 3),
               ),
@@ -919,11 +950,11 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
       
       // If permission is permanently denied, show settings dialog
       if (photoStatus == PermissionStatus.permanentlyDenied) {
-        print('🖼️ Photo permission permanently denied');
+        debugPrint('🖼️ Photo permission permanently denied');
         
         final shouldOpenSettings = await _showSettingsDialog(
-          'Photo Library Permission Required',
-          'Photo library access has been permanently denied. Please enable it in Settings to select photos.',
+          _languageService.getLocalizedText('item_submission.photo_library_permission_required'),
+          _languageService.getLocalizedText('item_submission.photo_library_permission_denied'),
         );
         
         if (shouldOpenSettings) {
@@ -932,8 +963,8 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Photo library access is needed to select images. You can use "Use Test Image" button for testing.'),
+                            SnackBar(
+                content: Text(_languageService.getLocalizedText('item_submission.photo_library_access_needed')),
               backgroundColor: Colors.orange,
               duration: Duration(seconds: 3),
             ),
@@ -944,7 +975,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
       
       // If permission is granted, pick from gallery
       if (photoStatus == PermissionStatus.granted) {
-        print('🖼️ Permission granted, opening gallery...');
+        debugPrint('🖼️ Permission granted, opening gallery...');
         
         final XFile? image = await _imagePicker.pickImage(
           source: ImageSource.gallery,
@@ -952,26 +983,22 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           imageQuality: 80,
         );
         
-        print('🖼️ Image picker result: ${image?.path ?? "null"}');
+        debugPrint('🖼️ Image picker result: ${image?.path ?? "null"}');
         
         if (image != null) {
           setState(() {
             _selectedImage = image;
           });
-          
-          print('🖼️ Image selected successfully: ${image.path}');
-          
-          // Auto-fill information using AI
           _autoFillItemInfo();
         } else {
-          print('🖼️ No image selected (user cancelled)');
+          debugPrint('🖼️ No image selected');
         }
       } else {
-        print('🖼️ Photo permission still not granted: $photoStatus');
+        debugPrint('🖼️ Photo permission still not granted: $photoStatus');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Photo library permission is required to select images. Use "Use Test Image" button for testing.'),
+                            SnackBar(
+                content: Text(_languageService.getLocalizedText('item_submission.photo_library_access_needed')),
               backgroundColor: Colors.orange,
               duration: Duration(seconds: 3),
             ),
@@ -979,15 +1006,17 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
         }
       }
     } catch (e) {
-      print('🖼️ Error picking image: $e');
+      debugPrint('🖼️ Error picking from gallery: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
+          SnackBar(
+            content: Text('${_languageService.getLocalizedText('item_submission.error_selecting_photo')}: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
   }
-
 
   Future<bool> _showPermissionDialog(String title, String message) async {
     return await showDialog<bool>(
@@ -999,11 +1028,11 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Close'),
+              child: Text(_languageService.getLocalizedText('item_submission.close')),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Allow'),
+              child: Text(_languageService.getLocalizedText('item_submission.allow')),
             ),
           ],
         );
@@ -1021,11 +1050,11 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
+              child: Text(_languageService.getLocalizedText('item_submission.cancel')),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Open Settings'),
+              child: Text(_languageService.getLocalizedText('item_submission.open_settings')),
             ),
           ],
         );
@@ -1090,7 +1119,7 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
         }
       }
     } catch (e) {
-      // Use default values if AI fails
+      // Fallback to default values
       setState(() {
         _itemName = 'Item';
         _category = 'General';
@@ -1105,9 +1134,23 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
   }
 
   Future<void> _submitItem() async {
+    // Validate all required fields
     if (_selectedImage == null || _itemName.trim().isEmpty || _priceController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please complete all required fields')),
+        SnackBar(content: Text(_languageService.getLocalizedText('item_submission.complete_fields'))),
+      );
+      return;
+    }
+    
+    // Validate price format
+    final priceError = _getPriceValidationError(_priceController.text);
+    if (priceError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(priceError),
+          backgroundColor: Colors.red.shade600,
+          duration: const Duration(seconds: 3),
+        ),
       );
       return;
     }
@@ -1117,27 +1160,65 @@ class _ItemSubmissionPageState extends State<ItemSubmissionPage> {
     });
     
     try {
-      // TODO: Implement actual submission to Firebase
-      // For now, just show success message
+      // Get user data from UserService
+      final userService = UserService();
+      final userId = userService.username ?? 'anonymous_user';
+      final userEmail = userService.email ?? 'anonymous@example.com';
       
-      await Future.delayed(const Duration(seconds: 2)); // Simulate API call
+      // Get current location
+      double latitude = 0.0;
+      double longitude = 0.0;
+      try {
+        final position = await LocationService.getCurrentLocation();
+        if (position != null) {
+          latitude = position.latitude;
+          longitude = position.longitude;
+        }
+      } catch (e) {
+        debugPrint('Warning: Could not get current location: $e');
+        // Continue with default coordinates (0.0, 0.0)
+      }
+      
+      // Create Item object from submitted data
+      final submittedItem = Item(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        userId: userId,
+        userEmail: userEmail,
+        itemName: _itemName,
+        category: _category,
+        description: _itemName, // Use item name as description for now
+        photoUrl: _selectedImage?.path ?? '',
+        storeName: _storeName,
+        address: _address,
+        price: double.tryParse(_priceController.text) ?? 0.0,
+        currency: _localCurrency,
+        submittedAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        tags: [_category], // Use category as tag
+        latitude: latitude,
+        longitude: longitude,
+      );
+      
+      // Simulate API call
+      await Future.delayed(const Duration(seconds: 2));
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Item submitted successfully!'),
-            backgroundColor: Colors.green,
+        // Navigate to price comparison results page
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PriceComparisonResultsPage(
+              submittedItem: submittedItem,
+              photoFile: _selectedImage != null ? File(_selectedImage!.path) : null,
+            ),
           ),
         );
-        
-        // Navigate to price comparison results
-        Navigator.pushReplacementNamed(context, '/price-comparison');
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error submitting item: $e'),
+            content: Text('${_languageService.getLocalizedText('item_submission.error_submitting')}: $e'),
             backgroundColor: Colors.red,
           ),
         );
